@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Form Rekap Teknisi</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-secondary-bg-color, #f1f3f6);
+    --card: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1d2330);
+    --hint: var(--tg-theme-hint-color, #6b7280);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --line: rgba(127, 127, 127, .28);
+    --danger: #d93838;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  main { padding: 12px 16px 96px; max-width: 560px; margin: 0 auto; }
+  .card { background: var(--card); border-radius: 14px; padding: 14px 16px; margin-bottom: 12px; }
+  .card.top { border-top: 4px solid #f2c100; }
+  label { display: block; font-size: 12px; font-weight: 700; letter-spacing: .03em;
+          text-transform: uppercase; color: var(--hint); margin: 12px 0 6px; }
+  label:first-child { margin-top: 0; }
+  .req::after { content: " *"; color: var(--danger); }
+  input, select, textarea { width: 100%; font: inherit; color: var(--text); background: transparent;
+          border: 1.5px solid var(--line); border-radius: 10px; padding: 11px 12px; outline: none; }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  select:disabled { opacity: .5; }
+  textarea { min-height: 80px; resize: vertical; }
+  .me { font-size: 17px; font-weight: 700; }
+  .me small { display: block; font-size: 13px; font-weight: 400; color: var(--hint); }
+  .check { display: flex; gap: 10px; align-items: center; padding: 10px 12px; margin-top: 12px;
+           border: 1.5px solid var(--line); border-radius: 10px; font-weight: 600; }
+  .check input { width: 20px; height: 20px; margin: 0; }
+  .err { color: var(--danger); font-size: 13px; margin-top: 4px; display: none; }
+  .err.show { display: block; }
+  .hide { display: none; }
+  #fallback { position: fixed; left: 0; right: 0; bottom: 0; padding: 12px 16px; background: var(--card); }
+  #fallback button { width: 100%; padding: 14px; border: 0; border-radius: 12px; font: inherit;
+                     font-weight: 700; background: var(--accent); color: var(--accent-text); }
+  .fatal { padding: 24px 16px; text-align: center; color: var(--danger); }
+</style>
+</head>
+<body>
+<main id="app">
+  <div class="card top">
+    <label>Pelapor</label>
+    <div class="me" id="me">-</div>
+    <label class="check"><input type="checkbox" id="sendiri"> Saya kerja sendiri (single teknisi)</label>
+    <div id="partnerBox">
+      <label for="p1" class="req">Partner 1</label>
+      <input id="p1" list="teknisi" placeholder="Ketik nama teknisi..." autocomplete="off">
+      <div class="err" id="e_p1">Pilih nama dari daftar, atau centang kerja sendiri.</div>
+      <label for="p2">Partner 2 (opsional)</label>
+      <input id="p2" list="teknisi" placeholder="Ketik nama teknisi..." autocomplete="off">
+      <div class="err" id="e_p2">Nama tidak ada di daftar teknisi.</div>
+      <datalist id="teknisi"></datalist>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="jenis" class="req">Jenis Pekerjaan</label>
+    <select id="jenis"></select>
+    <label for="tiket" id="l_tiket">Nomor Tiket</label>
+    <input id="tiket" placeholder="INC12345678" autocapitalize="characters" autocomplete="off">
+    <div class="err" id="e_tiket">Format tiket: INC diikuti angka.</div>
+    <label for="segpel" class="req">Segmen Pelanggan</label>
+    <select id="segpel"></select>
+    <label for="seggang" class="req">Segmen Gangguan</label>
+    <select id="seggang"></select>
+    <div id="detailBox" class="hide">
+      <label for="detail" class="req" id="l_detail">Detail Gangguan</label>
+      <select id="detail"></select>
+    </div>
+  </div>
+
+  <div class="card">
+    <label for="wo">Nomor WO (opsional)</label>
+    <input id="wo" placeholder="Kosongkan: bot mengambil dari INSERA" autocapitalize="characters" autocomplete="off">
+    <label for="catatan">Catatan (opsional)</label>
+    <textarea id="catatan" maxlength="500" placeholder="Keterangan tambahan..."></textarea>
+  </div>
+</main>
+<div id="fallback" class="hide"><button id="kirim">Kirim Laporan</button></div>
+
+<script>
+(async function () {
+  const tg = window.Telegram && Telegram.WebApp;
+  const $ = id => document.getElementById(id);
+  if (tg) { tg.ready(); tg.expand(); }
+
+  // Data menu dikirim bot lewat ?d=<base64url(deflate-raw(JSON))>
+  async function loadData() {
+    const d = new URLSearchParams(location.search).get('d');
+    if (!d) throw new Error('Data menu tidak ada. Buka form lewat tombol di bot (/rekap).');
+    const b64 = d.replace(/-/g, '+').replace(/_/g, '/');
+    const bin = Uint8Array.from(atob(b64 + '==='.slice((b64.length + 3) % 4)), c => c.charCodeAt(0));
+    if (!('DecompressionStream' in window)) throw new Error('Aplikasi Telegram terlalu lama, perbarui dulu.');
+    const s = new Blob([bin]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return JSON.parse(await new Response(s).text());
+  }
+
+  let D;
+  try { D = await loadData(); }
+  catch (e) { $('app').innerHTML = '<div class="fatal">' + e.message + '</div>'; return; }
+
+  function fill(sel, items, placeholder) {
+    sel.innerHTML = '';
+    sel.append(new Option(placeholder, ''));
+    for (const x of items) sel.append(new Option(x, x));
+  }
+
+  $('me').innerHTML = (D.me || '-') + '<small>' + (D.tag || '') + '</small>';
+  const nama = (D.t || []).filter(n => n !== D.me);
+  for (const n of nama) $('teknisi').append(new Option(n));
+  fill($('jenis'), D.j || [], '-- Pilih Jenis Pekerjaan --');
+  fill($('segpel'), D.p || [], '-- Pilih Segmen Pelanggan --');
+  fill($('seggang'), D.g || [], '-- Pilih Segmen Gangguan --');
+
+  $('sendiri').addEventListener('change', e => {
+    $('partnerBox').classList.toggle('hide', e.target.checked);
+  });
+
+  // Tiket wajib untuk pekerjaan yang punya tiket INSERA
+  const WAJIB_TIKET = new Set(D.wt || ['ASSURANCE', 'UNSPEC']);
+  function updTiket() {
+    $('l_tiket').classList.toggle('req', WAJIB_TIKET.has($('jenis').value));
+  }
+  $('jenis').addEventListener('change', updTiket);
+
+  // Detail gangguan hanya menampilkan sub-menu dari segmen gangguan yang dipilih
+  $('seggang').addEventListener('change', () => {
+    const subs = (D.s || {})[$('seggang').value] || [];
+    $('detailBox').classList.toggle('hide', !subs.length);
+    $('l_detail').textContent = 'Detail ' + ($('seggang').value || 'Gangguan');
+    fill($('detail'), subs, '-- Pilih Detail --');
+  });
+
+  function err(id, show) { $('e_' + id) && $('e_' + id).classList.toggle('show', show); return show; }
+
+  function collect() {
+    let bad = false;
+    const req = [['jenis'], ['segpel'], ['seggang']];
+    if (!$('detailBox').classList.contains('hide')) req.push(['detail']);
+    for (const [id] of req) {
+      const kosong = !$(id).value;
+      $(id).style.borderColor = kosong ? 'var(--danger)' : '';
+      bad = bad || kosong;
+    }
+    const tiket = $('tiket').value.trim().toUpperCase();
+    const tiketWajib = WAJIB_TIKET.has($('jenis').value);
+    bad = err('tiket', (tiketWajib || tiket) && !/^INC\d+$/.test(tiket)) || bad;
+    const partner = [];
+    if (!$('sendiri').checked) {
+      const p1 = $('p1').value.trim(), p2 = $('p2').value.trim();
+      bad = err('p1', !nama.includes(p1)) || bad;
+      bad = err('p2', p2 && !nama.includes(p2)) || bad;
+      if (nama.includes(p1)) partner.push(p1);
+      if (p2 && nama.includes(p2) && p2 !== p1) partner.push(p2);
+    } else { err('p1', false); err('p2', false); }
+    if (bad) return null;
+    return { v: 1, tiket, jenis: $('jenis').value, segpel: $('segpel').value,
+             seggang: $('seggang').value, detail: $('detail').value || '',
+             partner, wo: $('wo').value.trim().toUpperCase(), catatan: $('catatan').value.trim() };
+  }
+
+  function kirim() {
+    const data = collect();
+    if (!data) {
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+      const first = document.querySelector('.err.show') || document.querySelector('[style*="danger"]');
+      if (first) first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      return;
+    }
+    if (tg && tg.sendData) tg.sendData(JSON.stringify(data));   // otomatis menutup form
+    else alert(JSON.stringify(data, null, 2));
+  }
+
+  if (tg && tg.MainButton && tg.initData !== undefined && tg.platform !== 'unknown') {
+    tg.MainButton.setText('KIRIM LAPORAN');
+    tg.MainButton.onClick(kirim);
+    tg.MainButton.show();
+  } else {
+    $('fallback').classList.remove('hide');
+    $('kirim').addEventListener('click', kirim);
+  }
+})();
+</script>
+</body>
+</html>
