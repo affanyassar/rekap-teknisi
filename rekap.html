@@ -48,6 +48,14 @@
                 background: transparent; border: 1.5px solid var(--line); border-radius: 10px; }
   .seg button.on { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .hint { font-size: 12px; color: var(--hint); margin-top: 4px; }
+  .list { margin-top: 8px; max-height: 320px; overflow-y: auto; }
+  .item { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; border-bottom: 1px solid var(--line);
+          margin: 0; text-transform: none; letter-spacing: 0; font-weight: 400; color: var(--text); }
+  .item input { width: 20px; height: 20px; margin: 2px 0 0; flex: none; }
+  .item b { display: block; font-size: 14px; }
+  .item span { font-size: 12px; color: var(--hint); }
+  .mini { margin-top: 8px; padding: 7px 12px; font: inherit; font-size: 13px; color: var(--accent);
+          background: transparent; border: 1.5px solid var(--accent); border-radius: 8px; }
 </style>
 </head>
 <body>
@@ -67,13 +75,21 @@
     </div>
   </div>
 
+  <div class="card hide" id="sayaBox">
+    <label>Tiket saya (belum report)</label>
+    <div class="hint">Centang tiket yang selesai dengan pekerjaan yang SAMA. Beda gangguan → kirim terpisah.</div>
+    <div id="sayaList" class="list"></div>
+    <button type="button" class="mini" id="semua">Centang semua</button>
+  </div>
+
   <div class="card">
     <label for="jenis" class="req">Jenis Pekerjaan</label>
     <select id="jenis"></select>
     <div id="tiketBox">
-      <label for="tiket" id="l_tiket">Nomor Tiket / ID NT</label>
-      <input id="tiket" placeholder="INC12345678 atau NT00001" autocapitalize="characters" autocomplete="off">
-      <div class="hint">Laporan manual tanpa tiket: pakai ID NT dari perintah /nt.</div>
+      <label for="tiket" id="l_tiket">Nomor Tiket / ID NT lain</label>
+      <textarea id="tiket" rows="2" placeholder="INC12345678 atau NT00001 — boleh banyak, pisahkan spasi / baris baru"
+                autocapitalize="characters" autocomplete="off"></textarea>
+      <div class="hint" id="jumlah">Laporan manual tanpa tiket: pakai ID NT dari perintah /nt.</div>
       <div class="err" id="e_tiket">Isi INC… (tiket INSERA) atau NT… (order /nt).</div>
     </div>
     <label for="segpel" class="req">Segmen Pelanggan</label>
@@ -141,10 +157,42 @@
     $('l_tiket').classList.toggle('req', WAJIB_TIKET.has($('jenis').value));
   }
   $('jenis').addEventListener('change', updTiket);
-  // Nomor WO hanya untuk tiket INSERA (bukan ID NT)
-  $('tiket').addEventListener('input', () => {
-    $('woBox').classList.toggle('hide', /^\s*NT/i.test($('tiket').value));
+
+  // Checklist "tiket saya": tiket grouping (TEKNISI 1/2) yang belum di-report, dikirim bot lewat D.k
+  const MAKS = D.mx || 30;
+  const esc = t => String(t || '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  if ((D.k || []).length) {
+    $('sayaBox').classList.remove('hide');
+    $('sayaList').innerHTML = D.k.map(([id, ket]) =>
+      `<label class="item"><input type="checkbox" class="pilih" value="${esc(id)}"><div><b>${esc(id)}</b>` +
+      `<span>${esc(ket)}</span></div></label>`).join('');
+  }
+  $('semua').addEventListener('click', () => {
+    const cb = [...document.querySelectorAll('.pilih')];
+    const semua = cb.every(x => x.checked);
+    cb.forEach(x => { x.checked = !semua; });
+    $('semua').textContent = semua ? 'Centang semua' : 'Hapus centang';
+    updJumlah();
   });
+
+  function daftarTiket() {
+    const out = [];
+    for (const x of document.querySelectorAll('.pilih:checked')) out.push(x.value.toUpperCase());
+    for (const t of $('tiket').value.toUpperCase().split(/[\s,;]+/)) if (t && !out.includes(t)) out.push(t);
+    return out;
+  }
+  // jumlah tiket terpilih; nomor WO hanya bisa diisi bila tepat 1 tiket INSERA (lainnya diambil bot)
+  function updJumlah() {
+    const t = daftarTiket();
+    const inc = t.filter(x => x.startsWith('INC'));
+    $('woBox').classList.toggle('hide', !(t.length === 1 && inc.length === 1));
+    $('jumlah').textContent = t.length > 1
+      ? `${t.length} tiket akan dilapor sekaligus dengan data pekerjaan yang sama.`
+      : 'Laporan manual tanpa tiket: pakai ID NT dari perintah /nt.';
+  }
+  $('tiket').addEventListener('input', updJumlah);
+  $('sayaList').addEventListener('change', updJumlah);
+  updJumlah();
 
   // Detail gangguan hanya menampilkan sub-menu dari segmen gangguan yang dipilih
   $('seggang').addEventListener('change', () => {
@@ -165,9 +213,13 @@
       $(id).style.borderColor = kosong ? 'var(--danger)' : '';
       bad = bad || kosong;
     }
-    const tiket = $('tiket').value.trim().toUpperCase().replace(/\s+/g, '');
+    const tikets = daftarTiket();
+    const keliru = tikets.filter(t => !/^(INC|NT)\d+$/.test(t));
     const tiketWajib = WAJIB_TIKET.has($('jenis').value);
-    bad = err('tiket', (tiketWajib || tiket) && !/^(INC|NT)\d+$/.test(tiket)) || bad;
+    $('e_tiket').textContent = keliru.length ? 'Format salah: ' + keliru.slice(0, 5).join(', ')
+      : tikets.length > MAKS ? `Maksimal ${MAKS} tiket sekali kirim (dipilih ${tikets.length}).`
+      : 'Centang tiket di atas, atau isi INC… (tiket INSERA) / NT… (order /nt).';
+    bad = err('tiket', keliru.length > 0 || tikets.length > MAKS || (tiketWajib && !tikets.length)) || bad;
     const partner = [];
     if (!$('sendiri').checked) {
       const p1 = $('p1').value.trim(), p2 = $('p2').value.trim();
@@ -177,9 +229,10 @@
       if (p2 && nama.includes(p2) && p2 !== p1) partner.push(p2);
     } else { err('p1', false); err('p2', false); }
     if (bad) return null;
-    return { v: 3, tiket, jenis: $('jenis').value, segpel: $('segpel').value,
+    const satuInc = tikets.length === 1 && tikets[0].startsWith('INC');
+    return { v: 4, tikets, jenis: $('jenis').value, segpel: $('segpel').value,
              seggang: $('seggang').value, detail: $('detail').value || '', partner,
-             wo: tiket.startsWith('NT') ? '' : $('wo').value.trim().toUpperCase(), catatan: $('catatan').value.trim() };
+             wo: satuInc ? $('wo').value.trim().toUpperCase() : '', catatan: $('catatan').value.trim() };
   }
 
   function kirim() {
