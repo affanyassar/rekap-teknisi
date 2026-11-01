@@ -60,10 +60,24 @@
 </head>
 <body>
 <main id="app">
+  <div class="card hide" id="bantuBox">
+    <label class="check"><input type="checkbox" id="bantu"> Bantu lapor untuk teknisi lain</label>
+    <div id="bantuIsi" class="hide">
+      <label for="bNama" class="req">Atas nama teknisi</label>
+      <input id="bNama" list="semuaTek" placeholder="Ketik nama teknisi..." autocomplete="off">
+      <div class="err" id="e_bNama">Pilih nama dari daftar teknisi.</div>
+      <datalist id="semuaTek"></datalist>
+      <label for="bTgl" class="req">Tanggal kerja</label>
+      <input id="bTgl" type="date">
+      <div class="err" id="e_bTgl">Tanggal di luar batas yang diizinkan.</div>
+      <div class="hint">Laporan masuk ke produktivitas teknisi ini pada tanggal kerja. Nama Anda dicatat di DIBANTU OLEH.</div>
+    </div>
+  </div>
+
   <div class="card top">
     <label>Pelapor</label>
     <div class="me" id="me">-</div>
-    <label class="check"><input type="checkbox" id="sendiri"> Saya kerja sendiri (single teknisi)</label>
+    <label class="check"><input type="checkbox" id="sendiri"> <span id="l_sendiri">Saya kerja sendiri (single teknisi)</span></label>
     <div id="partnerBox">
       <label for="p1" class="req">Partner 1</label>
       <input id="p1" list="teknisi" placeholder="Ketik nama teknisi..." autocomplete="off">
@@ -141,7 +155,7 @@
   }
 
   $('me').innerHTML = (D.me || '-') + '<small>' + (D.tag || '') + '</small>';
-  const nama = (D.t || []).filter(n => n !== D.me);
+  let nama = (D.t || []).filter(n => n !== D.me);
   for (const n of nama) $('teknisi').append(new Option(n));
   fill($('jenis'), D.j || [], '-- Pilih Jenis Pekerjaan --');
   fill($('segpel'), D.p || [], '-- Pilih Segmen Pelanggan --');
@@ -150,6 +164,35 @@
   $('sendiri').addEventListener('change', e => {
     $('partnerBox').classList.toggle('hide', e.target.checked);
   });
+
+  // Bantu lapor (hanya admin, D.a): laporan atas nama teknisi lain pada tanggal kerjanya
+  const tglLokal = geser => {
+    const t = new Date();
+    t.setDate(t.getDate() + geser);
+    return `${t.getFullYear()}-${String(t.getMonth() + 1).padStart(2, '0')}-${String(t.getDate()).padStart(2, '0')}`;
+  };
+  function updBantu() {
+    const on = $('bantu').checked, atas = $('bNama').value.trim();
+    $('bantuIsi').classList.toggle('hide', !on);
+    $('me').innerHTML = on ? esc(atas || 'Pilih teknisi di atas') + '<small>dibantu oleh ' + esc(D.me) + '</small>'
+                           : esc(D.me || '-') + '<small>' + esc(D.tag) + '</small>';
+    $('l_sendiri').textContent = on ? 'Kerja sendiri (single teknisi)' : 'Saya kerja sendiri (single teknisi)';
+    nama = (D.t || []).filter(n => n !== (on ? atas : D.me));      // partner tidak boleh orang yang sama dengan pelapor
+    $('teknisi').innerHTML = '';
+    for (const n of nama) $('teknisi').append(new Option(n));
+    // checklist "tiket saya" berisi tiket milik admin, bukan teknisi yang dibantu
+    $('sayaBox').classList.toggle('hide', on || !(D.k || []).length);
+    if (on) { document.querySelectorAll('.pilih').forEach(x => { x.checked = false; }); updJumlah(); }
+  }
+  if (D.a) {
+    $('bantuBox').classList.remove('hide');
+    for (const n of D.t || []) $('semuaTek').append(new Option(n));
+    $('bTgl').min = tglLokal(-(D.bh || 7));
+    $('bTgl').max = tglLokal(0);
+    $('bTgl').value = tglLokal(-1);
+    $('bantu').addEventListener('change', updBantu);
+    $('bNama').addEventListener('input', updBantu);
+  }
 
   // Tiket wajib untuk pekerjaan yang punya tiket INSERA
   const WAJIB_TIKET = new Set(D.wt || ['ASSURANCE', 'UNSPEC']);
@@ -228,11 +271,18 @@
       if (nama.includes(p1)) partner.push(p1);
       if (p2 && nama.includes(p2) && p2 !== p1) partner.push(p2);
     } else { err('p1', false); err('p2', false); }
+    let bantu = null;
+    if ($('bantu').checked) {
+      const bn = $('bNama').value.trim(), bt = $('bTgl').value;
+      bad = err('bNama', !(D.t || []).includes(bn)) || bad;
+      bad = err('bTgl', !bt || bt < $('bTgl').min || bt > $('bTgl').max) || bad;
+      bantu = { nama: bn, tanggal: bt };
+    }
     if (bad) return null;
     const satuInc = tikets.length === 1 && tikets[0].startsWith('INC');
     return { v: 4, tikets, jenis: $('jenis').value, segpel: $('segpel').value,
              seggang: $('seggang').value, detail: $('detail').value || '', partner,
-             wo: satuInc ? $('wo').value.trim().toUpperCase() : '', catatan: $('catatan').value.trim() };
+             wo: satuInc ? $('wo').value.trim().toUpperCase() : '', catatan: $('catatan').value.trim(), bantu };
   }
 
   function kirim() {
