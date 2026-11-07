@@ -73,7 +73,27 @@
   .daftar button.skrg { color: var(--accent); font-weight: 700; }
   .daftar button.hapus { color: var(--danger); }
   .daftar small { color: var(--hint); }
-  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
+  .saring { display: flex; gap: 6px; }
+  .saring select { flex: none; width: 34%; font: inherit; color: var(--text); background: var(--card);
+          border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 8px; outline: none; }
+  .saring select.on { border-color: var(--accent); color: var(--accent); font-weight: 700; }
+  .saring input { flex: 1; min-width: 0; }
+  .pilihbar { display: flex; justify-content: space-between; align-items: center; font-size: 13px;
+              color: var(--hint); padding: 8px 2px 0; }
+  .pilihbar label, .cek { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  input[type=checkbox] { width: 20px; height: 20px; accent-color: var(--accent); margin: 0; }
+  .row1 .cek { margin-left: auto; }
+  .card.dipilih { box-shadow: 0 0 0 2px var(--accent) inset; }
+  .card.baru { box-shadow: 0 0 0 2px var(--ok) inset; }
+  .baru-info { font-size: 12px; font-weight: 700; color: var(--ok); margin-top: 6px; }
+  .bawah { position: fixed; left: 0; right: 0; bottom: 0; z-index: 15; display: none; gap: 8px;
+           padding: 10px 16px 14px; background: var(--card); box-shadow: 0 -2px 10px rgba(0,0,0,.12); }
+  .bawah.on { display: flex; }
+  .bawah button { padding: 12px; font-size: 15px; }
+  .bawah .salin { flex: 2; }
+  .bawah .lihat { flex: 1; }
+  main.ada-bawah { padding-bottom: 90px; }
+  .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 30;
            background: #222; color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 14px;
            opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
   .toast.on { opacity: .95; }
@@ -87,8 +107,19 @@
     <button class="icon" id="muat" aria-label="Muat ulang">🔄</button>
   </div>
   <div class="chips" id="chips"></div>
-  <input type="search" id="cari" placeholder="Cari INC / NT / STO / nama / teknisi">
+  <div class="saring">
+    <select id="sto"><option value="">Semua STO</option></select>
+    <input type="search" id="cari" placeholder="Cari INC / NT / nama / teknisi">
+  </div>
+  <div class="pilihbar">
+    <label><input type="checkbox" id="semua"> Pilih semua yang tampil</label>
+    <span id="npilih"></span>
+  </div>
 </header>
+<div class="bawah" id="bawah">
+  <button class="lihat" id="batal">Batal</button>
+  <button class="salin" id="salinbanyak">📋 Salin 0 order</button>
+</div>
 <main id="isi"><div class="pesan">Memuat data…</div></main>
 
 <div class="tirai" id="tirai"></div>
@@ -109,6 +140,10 @@ const KAT = [
 ];
 const AKTIF = ['ffg', 'blm', 'jln', 'kdl'];
 let D = {items: [], tek: [], ffgJam: 3}, pilih = 'blm', buka = new Set(), plotIt = null, plotSlot = 1;
+// tetap = tiket yang baru diplot: tetap tampil di kategori ini (ditandai hijau) sampai ganti kategori / muat ulang
+// dipilih = tiket yang dicentang untuk disalin sekaligus; tampil = urutan kartu yang sedang terlihat
+let tetap = new Set(), dipilih = new Set(), tampil = [];
+const JUDUL = Object.fromEntries(KAT);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
 const namaTek = v => (String(v || '').split('@')[0].trim()) || '';
@@ -144,6 +179,13 @@ async function muat() {
   try {
     D = await api({a: 'data'});
     D.items.forEach(it => it.t = waktu(it.rep));
+    tetap.clear();
+    const ada = new Set(D.items.map(it => it.j + it.id));
+    dipilih.forEach(k => { if (!ada.has(k)) dipilih.delete(k); });
+    const sel = $('sto'), skrg = sel.value;
+    const daftarSto = [...new Set(D.items.map(it => it.sto).filter(Boolean))].sort();
+    sel.innerHTML = '<option value="">Semua STO</option>'
+      + daftarSto.map(s => `<option${s === skrg ? ' selected' : ''}>${esc(s)}</option>`).join('');
     $('waktu').textContent = new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'});
     render();
   } catch (e) {
@@ -154,15 +196,28 @@ async function muat() {
 function cocok(it, q) {
   return !q || [it.id, it.sto, it.nama, it.t1, it.t2, it.st].join(' ').toLowerCase().includes(q);
 }
+const masuk = (it, k) => (k === 'aktif' ? AKTIF.includes(it.kat) : it.kat === k);
 function render() {
-  const q = $('cari').value.trim().toLowerCase();
-  const n = k => D.items.filter(it => (k === 'aktif' ? AKTIF.includes(it.kat) : it.kat === k)).length;
+  const q = $('cari').value.trim().toLowerCase(), sto = $('sto').value;
+  $('sto').classList.toggle('on', !!sto);
+  const diSto = it => !sto || it.sto === sto;
+  const n = k => D.items.filter(it => diSto(it) && masuk(it, k)).length;
   $('chips').innerHTML = KAT.map(([k, j]) =>
     `<button class="chip${k === pilih ? ' on' : ''}${k === 'ffg' && n(k) ? ' merah' : ''}" data-k="${k}">${j}<b>${n(k)}</b></button>`).join('');
   // saat mencari: cari di SEMUA item aktif, bukan hanya kategori terpilih
-  let its = D.items.filter(it => q ? cocok(it, q) : (pilih === 'aktif' ? AKTIF.includes(it.kat) : it.kat === pilih));
+  let its = D.items.filter(it => diSto(it) && (q ? cocok(it, q) : (masuk(it, pilih) || tetap.has(it.j + it.id))));
   its.sort((a, b) => (a.t || Infinity) - (b.t || Infinity));
+  tampil = its.map(it => it.j + it.id);
   $('isi').innerHTML = its.length ? its.map(kartu).join('') : '<div class="kosong-info">Tidak ada.</div>';
+  barPilih();
+}
+function barPilih() {
+  const nTampil = tampil.filter(k => dipilih.has(k)).length;
+  $('semua').checked = tampil.length > 0 && nTampil === tampil.length;
+  $('npilih').textContent = dipilih.size ? `${dipilih.size} dipilih` : '';
+  $('salinbanyak').textContent = `📋 Salin ${dipilih.size} order`;
+  $('bawah').classList.toggle('on', dipilih.size > 0);
+  $('isi').classList.toggle('ada-bawah', dipilih.size > 0);
 }
 function kartu(it) {
   const key = it.j + it.id;
@@ -177,10 +232,14 @@ function kartu(it) {
     const v = (s === 1 ? it.t1 : it.t2).trim();
     return `<button class="${v ? '' : 'kosong'}" data-plot="${key}" data-slot="${s}"><span>TEKNISI ${s}</span>${esc(namaTek(v) || v || '+ pilih')}</button>`;
   };
-  return `<div class="card${it.ffg && it.kat !== 'cbr' ? ' ffg' : ''}">
+  const baru = tetap.has(key) && !masuk(it, pilih) && !$('cari').value.trim();
+  const cls = (it.ffg && it.kat !== 'cbr' ? ' ffg' : '') + (dipilih.has(key) ? ' dipilih' : '') + (baru ? ' baru' : '');
+  return `<div class="card${cls}">
     <div class="row1"><span class="id">${esc(it.id)}</span><span class="badge">${esc(it.st || '-')}</span>
-      ${it.ffg ? '<span class="badge ffg">FFG</span>' : ''}${batas}</div>
+      ${it.ffg ? '<span class="badge ffg">FFG</span>' : ''}${batas}
+      <label class="cek"><input type="checkbox" data-pilih="${key}"${dipilih.has(key) ? ' checked' : ''}></label></div>
     <div class="meta">${esc(it.sto || '-')} · ${umur(it.t)}${it.nama ? ' · ' + esc(it.nama) : ''}</div>
+    ${baru ? `<div class="baru-info">✅ Baru diplot · pindah ke ${esc(JUDUL[it.kat] || it.kat)}</div>` : ''}
     <div class="tek">${tb(1)}${tb(2)}</div>
     <div class="aksi"><button class="salin" data-salin="${key}">📋 Salin format</button>
       <button class="lihat" data-lihat="${key}">${buka.has(key) ? 'Tutup' : 'Lihat'}</button></div>
@@ -222,8 +281,9 @@ async function simpan(v) {
   toast('Menyimpan…');
   try {
     const r = await api({a: 'plot', j: it.j, id: it.id, slot, v});
-    if (r.item) { r.item.t = waktu(r.item.rep); D.items[D.items.indexOf(it)] = r.item; }
-    else D.items = D.items.filter(x => x !== it);
+    const i = D.items.findIndex(x => x.j === it.j && x.id === it.id);
+    if (r.item) { r.item.t = waktu(r.item.rep); if (i >= 0) D.items[i] = r.item; tetap.add(it.j + it.id); }
+    else D.items = D.items.filter(x => !(x.j === it.j && x.id === it.id));
     render();
     toast(`✅ ${it.id} · Teknisi ${slot}: ${namaTek(v) || v || '(kosong)'}`);
     if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
@@ -232,9 +292,31 @@ async function simpan(v) {
 
 $('chips').addEventListener('click', e => {
   const b = e.target.closest('[data-k]'); if (!b) return;
-  pilih = b.dataset.k; $('cari').value = ''; render(); scrollTo(0, 0);
+  pilih = b.dataset.k; $('cari').value = ''; tetap.clear(); render(); scrollTo(0, 0);
 });
 $('cari').addEventListener('input', render);
+$('sto').addEventListener('change', () => { render(); scrollTo(0, 0); });
+$('isi').addEventListener('change', e => {
+  const c = e.target.closest('[data-pilih]'); if (!c) return;
+  c.checked ? dipilih.add(c.dataset.pilih) : dipilih.delete(c.dataset.pilih);
+  c.closest('.card').classList.toggle('dipilih', c.checked);
+  barPilih();
+});
+$('semua').addEventListener('change', e => {
+  tampil.forEach(k => e.target.checked ? dipilih.add(k) : dipilih.delete(k));
+  render();
+});
+$('batal').addEventListener('click', () => { dipilih.clear(); render(); });
+$('salinbanyak').addEventListener('click', async () => {
+  // urutan sesuai tampilan, lalu yang dipilih tapi sedang tidak tampil (mis. beda filter)
+  const keys = tampil.filter(k => dipilih.has(k)).concat([...dipilih].filter(k => !tampil.includes(k)));
+  const its = keys.map(cari).filter(it => it && it.fmt);
+  if (!its.length) return toast('FORMAT ORDER kosong');
+  if (await salin(its.map(it => it.fmt.trim()).join('\n\n'))) {
+    toast(`📋 ${its.length} order disalin`);
+    dipilih.clear(); render();
+  } else toast('Gagal menyalin');
+});
 $('muat').addEventListener('click', muat);
 $('isi').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return;
