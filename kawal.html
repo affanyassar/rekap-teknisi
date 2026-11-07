@@ -93,6 +93,12 @@
   .bawah .salin { flex: 2; }
   .bawah .lihat { flex: 1; }
   main.ada-bawah { padding-bottom: 90px; }
+  .tunda-info { font-size: 12px; font-weight: 700; color: var(--warn); margin-top: 6px; }
+  .galat-info { font-size: 12px; font-weight: 700; color: var(--danger); margin-top: 6px; }
+  .card.tunda .salin { opacity: .55; }
+  #status { display: none; background: var(--warn); color: #fff; padding: 6px 10px; font-size: 12px; font-weight: 700; }
+  #status.on { display: inline-block; }
+  #status.err { background: var(--danger); }
   .toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); z-index: 30;
            background: #222; color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 14px;
            opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
@@ -103,6 +109,7 @@
 <header>
   <div class="top">
     <h1>📡 Kawal Tiket</h1>
+    <button id="status"></button>
     <small id="waktu"></small>
     <button class="icon" id="muat" aria-label="Muat ulang">🔄</button>
   </div>
@@ -143,6 +150,11 @@ let D = {items: [], tek: [], ffgJam: 3}, pilih = 'blm', buka = new Set(), plotIt
 // tetap = tiket yang baru diplot: tetap tampil di kategori ini (ditandai hijau) sampai ganti kategori / muat ulang
 // dipilih = tiket yang dicentang untuk disalin sekaligus; tampil = urutan kartu yang sedang terlihat
 let tetap = new Set(), dipilih = new Set(), tampil = [];
+// antrean plot: tampilan langsung berubah, simpan ke sheet menyusul (dikumpulkan, 1 request untuk banyak plot)
+// antre = belum dikirim, jalan = sedang dikirim; kunci "T INC123|1"
+const antre = new Map(), jalan = new Map(), galat = new Map();
+let timer = null, sibuk = false, muatLagi = false;
+const JEDA = 1500, MAKS = 20;
 const JUDUL = Object.fromEntries(KAT);
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
@@ -175,9 +187,11 @@ async function api(params) {
 
 async function muat() {
   if (!API || !KUNCI) { $('isi').innerHTML = '<div class="pesan err">Link tidak lengkap. Buka lewat /kawal di bot.</div>'; return; }
+  if (sibuk || antre.size) { muatLagi = true; toast('⏳ Menunggu simpan selesai, lalu memuat ulang…'); return kirim(); }
   $('muat').disabled = true;
   try {
     D = await api({a: 'data'});
+    galat.clear();
     D.items.forEach(it => it.t = waktu(it.rep));
     tetap.clear();
     const ada = new Set(D.items.map(it => it.j + it.id));
@@ -191,6 +205,70 @@ async function muat() {
   } catch (e) {
     $('isi').innerHTML = `<div class="pesan err">❌ ${esc(e.message)}</div>`;
   } finally { $('muat').disabled = false; }
+}
+
+function kategori(it) {
+  const t1 = String(it.t1 || '').trim();
+  if (it.j === 'N') return t1 ? 'ntj' : 'ntb';
+  if (it.st === 'CLOSED') return 'cbr';
+  if (it.ffg) return 'ffg';
+  if (!t1) return 'blm';
+  return t1.includes('@') ? 'jln' : 'kdl';
+}
+const tunda = key => [...antre.values(), ...jalan.values()].some(x => x.j + x.id === key);
+function terapkan(it) {                       // nilai antrean ditimpakan ke item (tampilan lokal)
+  [...jalan.values(), ...antre.values()].forEach(x => { if (x.j + x.id === it.j + it.id) it['t' + x.slot] = x.v; });
+  it.kat = kategori(it);
+}
+function status() {
+  const n = antre.size + jalan.size, el = $('status');
+  el.classList.toggle('err', !n && galat.size > 0);
+  el.classList.toggle('on', n > 0 || galat.size > 0);
+  el.textContent = n ? `⏳ Menyimpan ${n}` : (galat.size ? `⚠️ ${galat.size} gagal` : '');
+  if (tg && tg.enableClosingConfirmation) n ? tg.enableClosingConfirmation() : tg.disableClosingConfirmation();
+}
+function jadwal(segera) {
+  clearTimeout(timer);
+  timer = setTimeout(kirim, segera ? 0 : JEDA);
+  status();
+}
+async function kirim() {
+  clearTimeout(timer);
+  if (sibuk || !antre.size) return;
+  sibuk = true;
+  const ambil = [...antre.entries()].slice(0, MAKS);
+  ambil.forEach(([k, x]) => { jalan.set(k, x); antre.delete(k); });
+  status();
+  try {
+    const r = await api({a: 'plotbanyak', p: JSON.stringify(ambil.map(([, x]) => [x.j, x.id, x.slot, x.v]))});
+    jalan.clear();
+    (r.items || []).forEach(n => {
+      const i = D.items.findIndex(x => x.j === n.j && x.id === n.id);
+      if (n.hapus) { if (i >= 0) D.items.splice(i, 1); return; }
+      n.t = waktu(n.rep); terapkan(n);
+      if (i >= 0) D.items[i] = n; else D.items.push(n);
+    });
+    (r.gagal || []).forEach(g => {
+      galat.set(g.j + g.id, `Teknisi ${g.slot}: ${g.error}`);
+      const x = ambil.find(([k]) => k === g.j + g.id + '|' + g.slot), it = cari(g.j + g.id);
+      if (x && it && !antre.has(x[0])) { it['t' + g.slot] = x[1].lama; terapkan(it); }
+    });
+    if (r.gagal && r.gagal.length) {
+      toast(`❌ ${r.gagal.length} gagal disimpan, ketuk 🔄 untuk memuat ulang`);
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+    } else if (!antre.size) {
+      toast(`✅ Tersimpan ke sheet`);
+      if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    }
+  } catch (e) {                               // jaringan / server: kembalikan ke antrean (kecuali sudah diganti)
+    ambil.forEach(([k, x]) => { jalan.delete(k); if (!antre.has(k)) antre.set(k, x); });
+    sibuk = false; status(); render();
+    toast('❌ Gagal simpan: ' + e.message + ' · ketuk tombol ⏳ untuk ulang');
+    return;
+  }
+  sibuk = false; status(); render();
+  if (antre.size) return jadwal(true);
+  if (muatLagi) { muatLagi = false; muat(); }
 }
 
 function cocok(it, q) {
@@ -232,14 +310,18 @@ function kartu(it) {
     const v = (s === 1 ? it.t1 : it.t2).trim();
     return `<button class="${v ? '' : 'kosong'}" data-plot="${key}" data-slot="${s}"><span>TEKNISI ${s}</span>${esc(namaTek(v) || v || '+ pilih')}</button>`;
   };
-  const baru = tetap.has(key) && !masuk(it, pilih) && !$('cari').value.trim();
-  const cls = (it.ffg && it.kat !== 'cbr' ? ' ffg' : '') + (dipilih.has(key) ? ' dipilih' : '') + (baru ? ' baru' : '');
+  const baru = tetap.has(key) && !masuk(it, pilih) && !$('cari').value.trim(), td = tunda(key);
+  const cls = (it.ffg && it.kat !== 'cbr' ? ' ffg' : '') + (dipilih.has(key) ? ' dipilih' : '') + (baru ? ' baru' : '')
+    + (td ? ' tunda' : '');
+  const info = td ? `<div class="tunda-info">⏳ Menyimpan ke sheet…${baru ? ' · pindah ke ' + esc(JUDUL[it.kat] || it.kat) : ''}</div>`
+    : galat.has(key) ? `<div class="galat-info">❌ ${esc(galat.get(key))}</div>`
+    : baru ? `<div class="baru-info">✅ Baru diplot · pindah ke ${esc(JUDUL[it.kat] || it.kat)}</div>` : '';
   return `<div class="card${cls}">
     <div class="row1"><span class="id">${esc(it.id)}</span><span class="badge">${esc(it.st || '-')}</span>
       ${it.ffg ? '<span class="badge ffg">FFG</span>' : ''}${batas}
       <label class="cek"><input type="checkbox" data-pilih="${key}"${dipilih.has(key) ? ' checked' : ''}></label></div>
     <div class="meta">${esc(it.sto || '-')} · ${umur(it.t)}${it.nama ? ' · ' + esc(it.nama) : ''}</div>
-    ${baru ? `<div class="baru-info">✅ Baru diplot · pindah ke ${esc(JUDUL[it.kat] || it.kat)}</div>` : ''}
+    ${info}
     <div class="tek">${tb(1)}${tb(2)}</div>
     <div class="aksi"><button class="salin" data-salin="${key}">📋 Salin format</button>
       <button class="lihat" data-lihat="${key}">${buka.has(key) ? 'Tutup' : 'Lihat'}</button></div>
@@ -275,20 +357,17 @@ function isiLembar() {
       return `<button data-v="${i}" class="${v === skrg ? 'skrg' : ''}">${esc(nm || v)} <small>${esc(tag)}</small></button>`;
     }).join('') + (list.length ? '' : '<div class="kosong-info">Tidak ada nama cocok.</div>');
 }
-async function simpan(v) {
-  const it = plotIt, slot = plotSlot;
+function simpan(v) {
+  const it = plotIt, slot = plotSlot, key = it.j + it.id;
   tutupLembar();
-  toast('Menyimpan…');
-  try {
-    const r = await api({a: 'plot', j: it.j, id: it.id, slot, v});
-    const i = D.items.findIndex(x => x.j === it.j && x.id === it.id);
-    if (r.item) { r.item.t = waktu(r.item.rep); if (i >= 0) D.items[i] = r.item; tetap.add(it.j + it.id); }
-    else D.items = D.items.filter(x => !(x.j === it.j && x.id === it.id));
-    render();
-    toast(`✅ ${it.id} · Teknisi ${slot}: ${namaTek(v) || v || '(kosong)'}`);
-    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-  } catch (e) { toast('❌ ' + e.message); }
+  const k = key + '|' + slot, sblm = antre.get(k) || jalan.get(k);
+  antre.set(k, {j: it.j, id: it.id, slot, v, lama: sblm ? sblm.lama : it['t' + slot]});
+  galat.delete(key);
+  terapkan(it); tetap.add(key);
+  render(); jadwal();
+  if (tg && tg.HapticFeedback) tg.HapticFeedback.selectionChanged();
 }
+const SABAR = '⏳ Format order sedang diperbarui, tunggu sebentar lalu salin lagi';
 
 $('chips').addEventListener('click', e => {
   const b = e.target.closest('[data-k]'); if (!b) return;
@@ -310,6 +389,7 @@ $('batal').addEventListener('click', () => { dipilih.clear(); render(); });
 $('salinbanyak').addEventListener('click', async () => {
   // urutan sesuai tampilan, lalu yang dipilih tapi sedang tidak tampil (mis. beda filter)
   const keys = tampil.filter(k => dipilih.has(k)).concat([...dipilih].filter(k => !tampil.includes(k)));
+  if (keys.some(tunda)) { jadwal(true); return toast(SABAR); }
   const its = keys.map(cari).filter(it => it && it.fmt);
   if (!its.length) return toast('FORMAT ORDER kosong');
   if (await salin(its.map(it => it.fmt.trim()).join('\n\n'))) {
@@ -318,12 +398,14 @@ $('salinbanyak').addEventListener('click', async () => {
   } else toast('Gagal menyalin');
 });
 $('muat').addEventListener('click', muat);
+$('status').addEventListener('click', () => antre.size ? jadwal(true) : (galat.size && toast('Ketuk 🔄 untuk memuat ulang data')));
 $('isi').addEventListener('click', async e => {
   const b = e.target.closest('button'); if (!b) return;
   if (b.dataset.plot) return bukaLembar(cari(b.dataset.plot), +b.dataset.slot);
   if (b.dataset.lihat) { const k = b.dataset.lihat; buka.has(k) ? buka.delete(k) : buka.add(k); return render(); }
   if (b.dataset.salin) {
     const it = cari(b.dataset.salin);
+    if (tunda(b.dataset.salin)) { jadwal(true); return toast(SABAR); }
     if (!it.fmt) return toast('FORMAT ORDER kosong');
     toast(await salin(it.fmt) ? '📋 Format order disalin' : 'Gagal menyalin, tekan Lihat lalu salin manual');
   }
