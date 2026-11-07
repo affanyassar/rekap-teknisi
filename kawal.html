@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Kawal Tiket</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: var(--tg-theme-secondary-bg-color, #f1f3f6);
+    --card: var(--tg-theme-bg-color, #ffffff);
+    --text: var(--tg-theme-text-color, #1d2330);
+    --hint: var(--tg-theme-hint-color, #6b7280);
+    --accent: var(--tg-theme-button-color, #2481cc);
+    --accent-text: var(--tg-theme-button-text-color, #ffffff);
+    --line: rgba(127, 127, 127, .28);
+    --danger: #d93838;
+    --warn: #d98a00;
+    --ok: #1f9d55;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.4 -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
+  header { position: sticky; top: 0; z-index: 5; background: var(--bg); padding: 10px 16px 8px; }
+  .top { display: flex; align-items: center; gap: 8px; }
+  .top h1 { font-size: 18px; margin: 0; flex: 1; }
+  .top small { color: var(--hint); font-size: 12px; }
+  button { font: inherit; border: 0; border-radius: 10px; cursor: pointer; }
+  .icon { background: var(--card); color: var(--text); padding: 7px 11px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; padding: 8px 0 6px; scrollbar-width: none; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; background: var(--card); color: var(--text); padding: 6px 11px; border-radius: 999px;
+          font-size: 13px; border: 1.5px solid transparent; white-space: nowrap; }
+  .chip b { margin-left: 3px; }
+  .chip.on { border-color: var(--accent); color: var(--accent); }
+  .chip.merah b { color: var(--danger); }
+  input[type=search] { width: 100%; font: inherit; color: var(--text); background: var(--card);
+          border: 1.5px solid var(--line); border-radius: 10px; padding: 9px 12px; outline: none; }
+  main { padding: 4px 16px 40px; max-width: 640px; margin: 0 auto; }
+  .card { background: var(--card); border-radius: 14px; padding: 12px 14px; margin-bottom: 10px; }
+  .card.ffg { border-left: 4px solid var(--danger); }
+  .row1 { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+  .id { font-weight: 700; font-size: 16px; }
+  .badge { font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 6px;
+           background: var(--line); color: var(--text); }
+  .badge.ffg { background: var(--danger); color: #fff; }
+  .badge.lewat { background: var(--danger); color: #fff; }
+  .meta { color: var(--hint); font-size: 13px; margin-top: 3px; overflow-wrap: anywhere; }
+  .tek { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 10px; }
+  .tek button { background: transparent; border: 1.5px solid var(--line); color: var(--text); text-align: left;
+                padding: 7px 9px; font-size: 13px; min-height: 44px; }
+  .tek button span { display: block; font-size: 10px; font-weight: 700; color: var(--hint); letter-spacing: .03em; }
+  .tek button.kosong { border-style: dashed; color: var(--hint); }
+  .aksi { display: flex; gap: 6px; margin-top: 8px; }
+  .aksi button { flex: 1; padding: 9px; font-size: 14px; }
+  .salin { background: var(--accent); color: var(--accent-text); }
+  .lihat { background: transparent; border: 1.5px solid var(--line) !important; color: var(--text); }
+  pre { white-space: pre-wrap; overflow-wrap: anywhere; font: 13px/1.45 inherit; font-family: inherit;
+        background: var(--bg); border-radius: 10px; padding: 10px; margin: 8px 0 0; }
+  .kosong-info { text-align: center; color: var(--hint); padding: 40px 0; }
+  .pesan { text-align: center; padding: 50px 20px; color: var(--hint); }
+  .pesan.err { color: var(--danger); }
+  /* lembar pilih teknisi */
+  .tirai { position: fixed; inset: 0; background: rgba(0,0,0,.45); z-index: 20; display: none; }
+  .lembar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 21; background: var(--card);
+            border-radius: 16px 16px 0 0; max-height: 82vh; display: none; flex-direction: column; }
+  .lembar.on, .tirai.on { display: flex; }
+  .lembar .kepala { padding: 14px 16px 8px; }
+  .lembar .kepala b { display: block; margin-bottom: 8px; }
+  .daftar { overflow-y: auto; padding: 0 8px 16px; }
+  .daftar button { display: block; width: 100%; text-align: left; background: transparent; color: var(--text);
+                   padding: 11px 10px; border-bottom: 1px solid var(--line); border-radius: 0; }
+  .daftar button.skrg { color: var(--accent); font-weight: 700; }
+  .daftar button.hapus { color: var(--danger); }
+  .daftar small { color: var(--hint); }
+  .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 30;
+           background: #222; color: #fff; padding: 9px 16px; border-radius: 10px; font-size: 14px;
+           opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; text-align: center; }
+  .toast.on { opacity: .95; }
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <h1>📡 Kawal Tiket</h1>
+    <small id="waktu"></small>
+    <button class="icon" id="muat" aria-label="Muat ulang">🔄</button>
+  </div>
+  <div class="chips" id="chips"></div>
+  <input type="search" id="cari" placeholder="Cari INC / NT / STO / nama / teknisi">
+</header>
+<main id="isi"><div class="pesan">Memuat data…</div></main>
+
+<div class="tirai" id="tirai"></div>
+<div class="lembar" id="lembar">
+  <div class="kepala"><b id="lj"></b><input type="search" id="lcari" placeholder="Cari nama teknisi"></div>
+  <div class="daftar" id="ldaftar"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const tg = window.Telegram && Telegram.WebApp;
+if (tg) { tg.ready(); tg.expand(); }
+const Q = new URLSearchParams(location.search);
+const API = Q.get('api') || '', KUNCI = Q.get('k') || '';
+const KAT = [
+  ['aktif', 'Semua aktif'], ['ffg', '🚨 FFG'], ['blm', '👤 Belum diplot'], ['jln', '🛠 Dikerjakan'],
+  ['kdl', '⚠️ Kendala'], ['cbr', '📝 Closed blm report'], ['ntb', '👤 NT belum diplot'], ['ntj', '🛠 NT dikerjakan'],
+];
+const AKTIF = ['ffg', 'blm', 'jln', 'kdl'];
+let D = {items: [], tek: [], ffgJam: 3}, pilih = 'blm', buka = new Set(), plotIt = null, plotSlot = 1;
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'}[c]));
+const namaTek = v => (String(v || '').split('@')[0].trim()) || '';
+
+function waktu(s) {
+  s = String(s || '').trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) return new Date(+m[1], m[2] - 1, +m[3], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  m = s.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?/);
+  if (m) return new Date(+m[3], m[2] - 1, +m[1], +(m[4] || 0), +(m[5] || 0), +(m[6] || 0));
+  return null;
+}
+function umur(t) {
+  if (!t) return '-';
+  const s = Math.max(0, (Date.now() - t) / 1000), h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60);
+  return h >= 24 ? `${Math.floor(h / 24)}h ${h % 24}j` : (h ? `${h}j ${m}m` : `${m}m`);
+}
+function toast(t) {
+  const el = $('toast'); el.textContent = t; el.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => el.classList.remove('on'), 2200);
+}
+async function api(params) {
+  const u = API + (API.includes('?') ? '&' : '?') + new URLSearchParams({...params, k: KUNCI});
+  const r = await fetch(u, {redirect: 'follow'});
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'Gagal');
+  return j;
+}
+
+async function muat() {
+  if (!API || !KUNCI) { $('isi').innerHTML = '<div class="pesan err">Link tidak lengkap. Buka lewat /kawal di bot.</div>'; return; }
+  $('muat').disabled = true;
+  try {
+    D = await api({a: 'data'});
+    D.items.forEach(it => it.t = waktu(it.rep));
+    $('waktu').textContent = new Date().toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'});
+    render();
+  } catch (e) {
+    $('isi').innerHTML = `<div class="pesan err">❌ ${esc(e.message)}</div>`;
+  } finally { $('muat').disabled = false; }
+}
+
+function cocok(it, q) {
+  return !q || [it.id, it.sto, it.nama, it.t1, it.t2, it.st].join(' ').toLowerCase().includes(q);
+}
+function render() {
+  const q = $('cari').value.trim().toLowerCase();
+  const n = k => D.items.filter(it => (k === 'aktif' ? AKTIF.includes(it.kat) : it.kat === k)).length;
+  $('chips').innerHTML = KAT.map(([k, j]) =>
+    `<button class="chip${k === pilih ? ' on' : ''}${k === 'ffg' && n(k) ? ' merah' : ''}" data-k="${k}">${j}<b>${n(k)}</b></button>`).join('');
+  // saat mencari: cari di SEMUA item aktif, bukan hanya kategori terpilih
+  let its = D.items.filter(it => q ? cocok(it, q) : (pilih === 'aktif' ? AKTIF.includes(it.kat) : it.kat === pilih));
+  its.sort((a, b) => (a.t || Infinity) - (b.t || Infinity));
+  $('isi').innerHTML = its.length ? its.map(kartu).join('') : '<div class="kosong-info">Tidak ada.</div>';
+}
+function kartu(it) {
+  const key = it.j + it.id;
+  let batas = '';
+  if (it.ffg && it.t) {
+    const b = new Date(+it.t + D.ffgJam * 3600e3), sisa = b - Date.now();
+    batas = sisa > 0
+      ? `<span class="badge ffg">Batas ${b.toLocaleTimeString('id-ID', {hour: '2-digit', minute: '2-digit'})} · sisa ${umur(Date.now() - sisa)}</span>`
+      : '<span class="badge lewat">FFG LEWAT BATAS</span>';
+  }
+  const tb = s => {
+    const v = (s === 1 ? it.t1 : it.t2).trim();
+    return `<button class="${v ? '' : 'kosong'}" data-plot="${key}" data-slot="${s}"><span>TEKNISI ${s}</span>${esc(namaTek(v) || v || '+ pilih')}</button>`;
+  };
+  return `<div class="card${it.ffg && it.kat !== 'cbr' ? ' ffg' : ''}">
+    <div class="row1"><span class="id">${esc(it.id)}</span><span class="badge">${esc(it.st || '-')}</span>
+      ${it.ffg ? '<span class="badge ffg">FFG</span>' : ''}${batas}</div>
+    <div class="meta">${esc(it.sto || '-')} · ${umur(it.t)}${it.nama ? ' · ' + esc(it.nama) : ''}</div>
+    <div class="tek">${tb(1)}${tb(2)}</div>
+    <div class="aksi"><button class="salin" data-salin="${key}">📋 Salin format</button>
+      <button class="lihat" data-lihat="${key}">${buka.has(key) ? 'Tutup' : 'Lihat'}</button></div>
+    ${buka.has(key) ? `<pre>${esc(it.fmt || '(FORMAT ORDER kosong)')}</pre>` : ''}
+  </div>`;
+}
+const cari = key => D.items.find(it => it.j + it.id === key);
+
+async function salin(teks) {
+  try { await navigator.clipboard.writeText(teks); return true; } catch (e) {}
+  const ta = document.createElement('textarea');
+  ta.value = teks; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+  ta.remove(); return ok;
+}
+
+function bukaLembar(it, slot) {
+  plotIt = it; plotSlot = slot;
+  $('lj').textContent = `Teknisi ${slot} · ${it.id}`;
+  $('lcari').value = '';
+  isiLembar();
+  $('tirai').classList.add('on'); $('lembar').classList.add('on');
+}
+function tutupLembar() { $('tirai').classList.remove('on'); $('lembar').classList.remove('on'); plotIt = null; }
+function isiLembar() {
+  const q = $('lcari').value.trim().toLowerCase();
+  const skrg = (plotSlot === 1 ? plotIt.t1 : plotIt.t2);
+  const list = D.tek.map((v, i) => [v, i]).filter(([v]) => !q || v.toLowerCase().includes(q));
+  $('ldaftar').innerHTML = (skrg.trim() ? '<button class="hapus" data-v="-1">🧹 Kosongkan</button>' : '')
+    + list.map(([v, i]) => {
+      const nm = namaTek(v), tag = v.includes('@') ? '@' + v.split('@')[1].trim() : '';
+      return `<button data-v="${i}" class="${v === skrg ? 'skrg' : ''}">${esc(nm || v)} <small>${esc(tag)}</small></button>`;
+    }).join('') + (list.length ? '' : '<div class="kosong-info">Tidak ada nama cocok.</div>');
+}
+async function simpan(v) {
+  const it = plotIt, slot = plotSlot;
+  tutupLembar();
+  toast('Menyimpan…');
+  try {
+    const r = await api({a: 'plot', j: it.j, id: it.id, slot, v});
+    if (r.item) { r.item.t = waktu(r.item.rep); D.items[D.items.indexOf(it)] = r.item; }
+    else D.items = D.items.filter(x => x !== it);
+    render();
+    toast(`✅ ${it.id} · Teknisi ${slot}: ${namaTek(v) || v || '(kosong)'}`);
+    if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+  } catch (e) { toast('❌ ' + e.message); }
+}
+
+$('chips').addEventListener('click', e => {
+  const b = e.target.closest('[data-k]'); if (!b) return;
+  pilih = b.dataset.k; $('cari').value = ''; render(); scrollTo(0, 0);
+});
+$('cari').addEventListener('input', render);
+$('muat').addEventListener('click', muat);
+$('isi').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.plot) return bukaLembar(cari(b.dataset.plot), +b.dataset.slot);
+  if (b.dataset.lihat) { const k = b.dataset.lihat; buka.has(k) ? buka.delete(k) : buka.add(k); return render(); }
+  if (b.dataset.salin) {
+    const it = cari(b.dataset.salin);
+    if (!it.fmt) return toast('FORMAT ORDER kosong');
+    toast(await salin(it.fmt) ? '📋 Format order disalin' : 'Gagal menyalin, tekan Lihat lalu salin manual');
+  }
+});
+$('tirai').addEventListener('click', tutupLembar);
+$('lcari').addEventListener('input', isiLembar);
+$('ldaftar').addEventListener('click', e => {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  simpan(b.dataset.v === '-1' ? '' : D.tek[+b.dataset.v]);
+});
+if (tg) tg.BackButton && tg.onEvent('backButtonClicked', tutupLembar);
+setInterval(() => { if (!plotIt && document.visibilityState === 'visible') render(); }, 60000);  // umur & sisa waktu
+muat();
+</script>
+</body>
+</html>
